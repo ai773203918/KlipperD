@@ -1,0 +1,74 @@
+#!/usr/bin/expect
+# 指定 Expect 解释器(不可省略，否则在某些环境中会出错)
+# 设置超时时间(s)
+set timeout 3000
+# 抓取 KIAUH 脚本的输出
+spawn /home/zwzw/kiauh/kiauh.sh
+# 存储菜单交互
+set menu 1
+expect {
+    # ########## 安装完成 #########
+    # Mainsail 安装成功！退出 KIAUH
+    "Mainsail installation complete!" {
+        set menu 0
+        send "B\r"
+        sleep 1
+        exp_continue
+    }
+    "Installation Menu > Mainsail" {
+        set menu 0
+        send "B\r"
+        sleep 1
+        exp_continue
+    }
+    # ############ 主菜单 ############
+    # 选择安装(首次运行时需要进入安装菜单，后续运行则直接退出)
+    "Main Menu" {
+        # 内部变量menu,需要转义否则就是外部变量
+        if {$menu} {
+            send "1\r"
+            # 增加延迟时间,防止脚本过快执行
+            sleep 1
+            exp_continue
+        } else {
+            send "Q\r"
+            sleep 1
+            exp_continue
+        }
+    }
+    # ############ 安装菜单 ############
+    # 选择安装组件(首次运行时需要进入安装，后续运行则直接退出)
+    "Installation Menu" {
+        if {$menu} {
+            send "3\r"
+            sleep 1
+            exp_continue
+        } else {
+            send "B\r"
+            sleep 1
+            exp_continue
+        }
+    }
+    # 继续安装 Mainsail,选择 Y
+    "Continue Mainsail installation?" {
+        send "Y\r"
+        sleep 1
+        exp_continue
+    }
+    # 下载默认配置文件Mainsail-Config,选择 Y
+    "Download the recommended Mainsail-Config?" {
+        send "Y\r"
+        sleep 1
+        exp_continue
+    }
+    # 配置 Mainsail 端口
+    "Configure Mainsail for port" {
+        send "5001\r"
+        sleep 1
+        exp_continue
+    }
+    # 超时处理
+    timeout {
+        puts "!!! 操作超时！"
+    }
+}

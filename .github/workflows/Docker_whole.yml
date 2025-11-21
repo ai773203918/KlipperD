@@ -1,0 +1,250 @@
+# 工作流的名字
+name: 构建 Docker_whole 镜像
+
+on:
+  workflow_dispatch:  # 手动触发工作流
+    inputs:  # 输入参数
+      components_env:  # 变量名
+        description: '选择要安装的组件 (k=Klipper, m=Moonraker, s=Mainsail, f=Fluidd, w=Crowsnest)'  # 输入描述
+        required: true  # 此输入是必需的
+        default: 'kmsfw'  # 默认值
+        type: string  # 输入类型为字符串
+  # 定时触发 - 每周六 UTC 00:00(北京时间 08:00)
+  schedule:
+    - cron: '0 0 * * 6'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest  # 使用最新的 Ubuntu 镜像来运行工作流
+    permissions:  # 设置工作流所需的权限
+      contents: read  # 允许读取仓库内容
+      packages: write  # 允许写入包权限
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 QEMU
+        uses: docker/setup-qemu-action@v3
+        with:  # 设置 QEMU 支持的架构
+          platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v5  # 支持架构列表
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录到 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}  # Docker Hub 用户名
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}  # Docker Hub Token
+
+      - name: 为每个架构构建、配置并打包镜像
+        run: |
+          # 获取组件环境变量，为定时任务设置默认值
+          if [ -z "${{ github.event.inputs.components_env }}" ]; then
+            COMPONENTS_ENV_VALUE="kmsfw" # 定时任务默认安装所有组件
+            echo "🤖 由定时任务触发,使用默认组件: $COMPONENTS_ENV_VALUE"
+          else
+            COMPONENTS_ENV_VALUE="${{ github.event.inputs.components_env }}"
+            echo "👤 由手动触发,使用指定组件: $COMPONENTS_ENV_VALUE"
+          fi
+
+          # ⭐定义目标架构列表(amd64 默认架构放在最后,放前面会导致其它架构的报错)
+          PLATFORMS=("linux/arm64" "linux/arm/v7" "linux/arm/v5" "linux/amd64")
+          # PLATFORMS=("linux/amd64")
+
+          # 基础镜像名称(使用预构建的 918178/klipperd:base 作为基础镜像)
+          BASE_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/klipperd:base"
+          # 最终镜像名称(不包括标签)
+          FINAL_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/klipperd"
+          # 最终多架构镜像的标签(使用安装组件名称作为标签)
+          FINAL_TAG="${COMPONENTS_ENV_VALUE}"
+
+          # 用于存储成功构建的特定架构镜像标签
+          SUCCESSFUL_IMAGES=()
+
+          # 遍历所有目标平台
+          for PLATFORM in "${PLATFORMS[@]}"; do
+            echo "======================================================"
+            echo "🚀 开始为架构 ${PLATFORM} 配置镜像..."
+            echo "======================================================"
+
+            # 拉取当前架构的基础镜像
+            echo "正在拉取 ${PLATFORM} 架构的镜像..."
+            docker pull --platform "${PLATFORM}" "${BASE_IMAGE_NAME}"
+            echo "✅ ${PLATFORM} 架构的镜像拉取完成。"
+
+            # 配置打包镜像标签
+            ARCH_TAG=$(echo $PLATFORM | sed 's|linux/||g' | sed 's|/|-|g')
+            CONTAINER_NAME="klipper-installer-${ARCH_TAG}"
+            CONFIGURED_IMAGE_TAG="${FINAL_IMAGE_NAME}:${FINAL_TAG}-${ARCH_TAG}"
+
+            echo "容器名: ${CONTAINER_NAME}"
+            echo "最终镜像标签: ${CONFIGURED_IMAGE_TAG}"
+
+            # --- 步骤 A: 运行容器,让 systemd 成为 PID 1 ---
+            echo "🚀 [${PLATFORM}] 启动容器进行配置..."
+            # 不可覆盖 ENTRYPOINT,确保 systemd 是 PID 1
+            docker run -d \
+              --name "${CONTAINER_NAME}" \
+              --platform "${PLATFORM}" \
+              --privileged \
+              --security-opt seccomp=unconfined \
+              --tmpfs /tmp \
+              --tmpfs /run \
+              --tmpfs /run/lock \
+              -e COMPONENTS_ENV="${COMPONENTS_ENV_VALUE}" \
+              "${BASE_IMAGE_NAME}"
+
+            # --- 步骤 B: 在容器内执行所有配置脚本(带重试) ---
+            echo "🔧 [${PLATFORM}] 在容器内执行所有配置脚本..."
+            docker exec "${CONTAINER_NAME}" bash -c "
+              set -e
+
+              # 定义一个带重试的函数
+              retry() {
+                local retries=\$1
+                local command=\$2
+                local delay=\$3
+                local count=0
+
+                until [ \$count -ge \$retries ]; do
+                  # 尝试执行命令
+                  eval \$command && break
+                  count=\$((\$count + 1))
+                  echo \"命令失败,等待 \$delay 秒后重试 (\$count/\$retries)...\"
+                  sleep \$delay
+                done
+
+                if [ \$count -ge \$retries ]; then
+                  echo \"❌ 命令在 \$retries 次重试后仍然失败。\"
+                  exit 1
+                fi
+              }
+
+              # 1. 等待 systemd 基本可用(即使状态是 degraded)
+              echo '⏳ 等待 systemd 基本可用...'
+              retry 10 'systemctl --version' 5
+
+              # 2. 切换用户并克隆(这个操作不依赖 systemd,可以提前)
+              echo '🔄 切换到 zwzw 用户并克隆 kiauh...'
+              sudo -u zwzw bash -c 'git clone https://github.com/dw-0/kiauh.git /home/zwzw/kiauh'
+              echo '✅ kiauh 克隆完成。'
+
+              # 3. 等待 systemd 达到稳定状态
+              echo '⏳ 等待 systemd 达到稳定状态(running 或 degraded)...'
+              retry 30 '[[ \$(systemctl is-system-running 2>/dev/null) == \"running\" || \$(systemctl is-system-running 2>/dev/null) == \"degraded\" ]]' 10
+              echo \"✅ systemd 已就绪。\"
+
+              # 4. 按顺序执行安装脚本
+              COMPONENTS_TO_INSTALL='${COMPONENTS_ENV_VALUE}'
+              echo \"🎯 准备安装组件: \$COMPONENTS_TO_INSTALL\"
+              ORDER=('k' 'm' 's' 'f' 'w')
+              for comp in \"\${ORDER[@]}\"; do
+                if [[ \"\$COMPONENTS_TO_INSTALL\" == *\"\$comp\"* ]]; then
+                  case \"\$comp\" in
+                    'k')
+                      echo \"🚀 安装 Klipper...\"
+                      # 对 expect 脚本也进行重试,因为它可能因系统状态不稳而失败
+                      retry 3 'sudo -u zwzw expect /home/zwzw/scripts/install_klipper.exp' 10
+                      ;;
+                    'm')
+                      echo \"🚀 安装 Moonraker...\"
+                      retry 3 'sudo -u zwzw expect /home/zwzw/scripts/install_moonraker.exp' 10
+                      ;;
+                    's')
+                      echo \"🚀 安装 Mainsail...\"
+                      retry 3 'sudo -u zwzw expect /home/zwzw/scripts/install_mainsail.exp' 10
+                      ;;
+                    'f')
+                      echo \"🚀 安装 Fluidd...\"
+                      retry 3 'sudo -u zwzw expect /home/zwzw/scripts/install_fluidd.exp' 10
+                      ;;
+                    'w')
+                      echo \"🚀 安装 Crowsnest...\"
+                      retry 3 'sudo -u zwzw expect /home/zwzw/scripts/install_crowsnest.exp' 10
+                      ;;
+                  esac
+                fi
+              done
+
+              echo \"✅ [SUCCESS] === Klipper Docker 组件管理任务完成 ===\"
+            "
+
+            # --- 步骤 C: 停止并打包成最终镜像 ---
+            echo "🛑 [${PLATFORM}] 停止容器并打包为最终镜像..."
+            docker stop "${CONTAINER_NAME}"
+            # 使用 --change 来修改最终镜像的 ENTRYPOINT(基础镜像就是,为了保险起见这里也修改一下)
+            docker commit --change='ENTRYPOINT ["/lib/systemd/systemd", "log-level=info", "unit=sysinit.target"]' "${CONTAINER_NAME}" "${CONFIGURED_IMAGE_TAG}"
+
+            # --- 步骤 D: 推送最终镜像 ---
+            echo "📤 [${PLATFORM}] 推送配置好的镜像..."
+            docker push "${CONFIGURED_IMAGE_TAG}"
+
+            # 将成功的镜像标签添加到数组中
+            SUCCESSFUL_IMAGES+=("${CONFIGURED_IMAGE_TAG}")
+
+            # 清理容器
+            echo "🗑️  [${PLATFORM}] 清理容器和的基础镜像..."
+            docker rm -f "${CONTAINER_NAME}"
+            docker rmi "${BASE_IMAGE_NAME}" || true
+            echo "======================================================"
+          done
+
+          # 将成功构建的镜像列表保存到环境变量中
+          echo "MANIFEST_IMAGES=$(printf '%s,' "${SUCCESSFUL_IMAGES[@]}")" >> $GITHUB_ENV
+
+      - name: 创建并推送多架构镜像清单
+        run: |
+          FINAL_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/klipperd:${{ github.event.inputs.components_env }}"
+          IMAGES_LIST_STRING="${{ env.MANIFEST_IMAGES }}"
+          IMAGES_LIST_STRING="${IMAGES_LIST_STRING%?}"
+
+          if [ -z "$IMAGES_LIST_STRING" ]; then
+            echo "❌ 没有成功构建的架构镜像,无法创建多架构清单。"
+            exit 1
+          fi
+
+          # 计算带日期的标签 (格式: DDMMYY)
+          DATE_TAG=$(date +%d%m%y)
+          echo "📅 日期标签: ${DATE_TAG}"
+
+          IMAGES_TO_MANIFEST_ARGS=$(echo "$IMAGES_LIST_STRING" | tr ',' ' ')
+          echo "🔨 使用以下镜像创建多架构清单: ${IMAGES_TO_MANIFEST_ARGS}"
+          echo "🚀 最终镜像名称: ${FINAL_IMAGE_NAME}"
+          echo "🚀 创建多架构镜像，标签为: ${FINAL_IMAGE_NAME} 和 ${FINAL_IMAGE_NAME}-${DATE_TAG}"
+
+          eval docker buildx imagetools create \
+            --tag "${FINAL_IMAGE_NAME}" \
+            --tag "${FINAL_IMAGE_NAME}-${DATE_TAG}" \
+            ${IMAGES_TO_MANIFEST_ARGS}
+
+          echo "✅ 多架构镜像清单创建并推送成功!"
+
+      # - name: 清理独立的架构镜像(实测无效,暂时留着吧)
+      #   if: always()  # 即使上一步失败也尝试清理,但通常只在成功后执行
+      #   run: |
+      #     # 从环境变量中读取镜像列表字符串
+      #     IMAGES_LIST_STRING="${{ env.MANIFEST_IMAGES }}"
+      #     IMAGES_LIST_STRING="${IMAGES_LIST_STRING%?}"
+
+      #     if [ -z "$IMAGES_LIST_STRING" ]; then
+      #       echo "没有需要清理的独立架构镜像。"
+      #       exit 0
+      #     fi
+
+      #     echo "🗑️  开始清理独立的架构镜像..."
+
+      #     # 将逗号分隔的字符串转换为数组
+      #     IFS=',' read -ra IMAGE_ARRAY <<< "$IMAGES_LIST_STRING"
+
+      #     # 遍历数组并删除每个镜像
+      #     for IMAGE_TAG in "${IMAGE_ARRAY[@]}"; do
+      #       if [ -n "$IMAGE_TAG" ]; then
+      #         echo "正在删除镜像: ${IMAGE_TAG}"
+      #         # 使用 manifest rm 来删除多架构清单中的特定架构
+      #         # 如果镜像是独立的,这个命令也能删除它
+      #         docker manifest rm "${IMAGE_TAG}" || true
+      #       fi
+      #     done
+
+      #     echo "✅ 独立架构镜像清理完成。"

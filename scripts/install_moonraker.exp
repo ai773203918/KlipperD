@@ -1,0 +1,77 @@
+#!/usr/bin/expect
+# 指定 Expect 解释器(不可省略，否则在某些环境中会出错)
+# 设置超时时间(s)
+set timeout 6000
+# 抓取 KIAUH 脚本的输出
+spawn /home/zwzw/kiauh/kiauh.sh
+# 存储菜单交互
+set menu 1
+expect {
+    # 创建示例文件,选择 Y
+    " Create example moonraker.conf?" {
+        send "Y\r"
+        sleep 1
+        exp_continue 
+    }
+    # ########## 安装完成 #########
+    # 选择 Klipper 实例来设置 Moonraker(多Klipper实例时会有),A选择全部实例
+    "Select Klipper instance to setup Moonraker for" {
+        send "A\r"
+        sleep 1
+        send "B\r"
+        exp_continue 
+    }
+    # Moonraker 安装成功,标记menu为0,表示不再进入安装菜单
+    " Moonraker successfully installed!" {
+        set menu 0
+        sleep 1
+        send "B\r"
+        exp_continue
+    }
+    # 启动失败(systemd 暂未启动,重启后正常)
+    "System has not been booted with systemd as init system" {
+        set menu 0
+        sleep 1
+        send "B\r"
+        exp_continue
+    }
+    # 安装 Python 要求时出错:安装 Python 要求失败
+    "Error installing Python requirements: Installing Python requirements failed!" {
+        set menu 0
+        sleep 1
+        send "B\r"
+        exp_continue
+    }
+    # ############ 主菜单 ############
+    # 选择安装(首次运行时需要进入安装菜单，后续运行则直接退出)
+    "Main Menu" {
+        # 内部变量menu,需要转义否则就是外部变量
+        if {$menu} {
+            send "1\r"
+            # 增加延迟时间,防止脚本过快执行
+            sleep 1
+            exp_continue
+        } else {
+            send "Q\r"
+            sleep 1
+            exp_continue
+        }
+    }
+    # ############ 安装菜单 ############
+    # 选择安装组件(首次运行时需要进入安装，后续运行则直接退出)
+    "Installation Menu" {
+        if {$menu} {
+            send "2\r"
+            sleep 1
+            exp_continue
+        } else {
+            send "B\r"
+            sleep 1
+            exp_continue
+        }
+    }
+    # 超时处理
+    timeout {
+        puts "!!! 操作超时！"
+    }
+}

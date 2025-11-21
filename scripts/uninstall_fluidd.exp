@@ -1,0 +1,77 @@
+#!/usr/bin/expect
+# 指定 Expect 解释器(不可省略，否则在某些环境中会出错)
+# 设置超时时间(s)
+set timeout 3000
+# 抓取 KIAUH 脚本的输出
+spawn /home/zwzw/kiauh/kiauh.sh
+# 存储菜单交互
+set menu 1
+expect {
+    # ############ 成功卸载处理 ############
+    # 卸载完成,退出 KIAUH
+    "Fluidd Removal Process completed" {
+        set menu 0
+        send "B\r"
+        sleep 1
+        exp_continue
+    }
+    # 启动失败(systemd 暂未启动,重启后正常)
+    "System has not been booted with systemd as init system" {
+        set menu 0
+        sleep 1
+        send "B\r"
+        exp_continue
+    }
+    # 启动失败(systemd 暂未启动,重启后正常)
+    "An unexpected error occured:" {
+        set menu 0
+        sleep 1
+        send "B\r"
+        exp_continue
+    }
+    # ############ 主菜单 ############
+    # 选择卸载(首次运行时需要进入卸载菜单，后续运行则直接退出)
+    "Main Menu" {
+        # 内部变量menu,需要转义否则就是外部变量
+        if {$menu} {
+            send "3\r"
+            sleep 1
+            exp_continue
+        } else {
+            send "q\r"
+            sleep 1
+            exp_continue
+        }
+    }
+    # ############ 卸载菜单 ############
+    # 选择卸载组件(首次运行时需要进入卸载，后续运行则直接退出)
+    "Remove Menu" {
+        if {$menu} {
+            send "4\r"
+            sleep 1
+            exp_continue
+        } else {
+            send "b\r"
+            sleep 1
+            exp_continue
+        }
+    }
+    # 选择卸载项,选择全部删除
+    "Select everything" {
+        send "A\r"
+        sleep 1
+        send "C\r"
+        sleep 1
+        exp_continue
+    }
+    # 选择卸载实例,选择全部实例
+    "Select Fluidd instance to remove:" {
+        send "A\r"
+        sleep 1
+        exp_continue
+    }
+    # 超时处理
+    timeout {
+        puts "!!! 操作超时！"
+    }
+}

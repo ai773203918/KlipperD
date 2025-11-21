@@ -1,0 +1,37 @@
+services:
+  klipperD:
+    image: docker.1ms.run/918178/klipperd:kmsfw  # 完整包,部署后可直接使用
+    # image: 918178/klipperd:latest  # 包含大部分依赖，快速部署
+    # image: 918178/klipperd:mini-latest  # 最小依赖，解决Docker无法使用kuiah问题
+    # build:  # 构建镜像(若是不许指定构建文件,则可以省略 build: .)
+    #   context: .  # 指定构建上下文,默认为当前目录
+    #   dockerfile: Dockerfile  # (包含绝大数依赖)指定 Dockerfile 文件,默认为当前目录下的 Dockerfile 文件
+    #   # dockerfile: Dockerfile_mini  # (最小依赖)指定 Dockerfile 文件
+    container_name: klipperd  # 自定义容器名称
+    restart: unless-stopped  # 非手动停止则总是重启
+    privileged: true  # 赋予容器所有内核能力(systemd 需要特权模式运行,必须否则无法启动)
+    security_opt:  # 安全选项
+      - seccomp=unconfined  # 设置为无限制模式
+    # cgroup_parent: docker.slice  # 设置 cgroup 父级,docker.slice 由 systemd 管理
+    # cgroup: private  # private 创建独立的 cgroup 命名空间(高版本默认private,可省略)
+    # command: /lib/systemd/systemd log-level=info unit=sysinit.target  # 启动 systemd 并设置日志级别为 info
+    tmpfs:  # 挂载为tmpfs(不可省略)
+      - /tmp
+      - /run
+      - /run/lock
+    ports:
+      - "8080:5001"  # Mainsail 端口
+      - "8081:5002"  # Fluidd 端口
+      - "7125:7125"  # Moonraker 端口
+    # volumes:
+    #   # - ./klipper_install.sh:/home/zwzw/klipper_install.sh  # 安装脚本(内置脚本)
+    #   - ./klipperd:/home/zwzw/printer_data  # 挂载 Klipper 数据目录(若是无法正常工作,请使用卷模式挂载)
+    #   # - klipperd:/home/zwzw/printer_data  # 挂载 Klipper 数据目录(卷模式挂载)
+    # environment:  # 若是使用完整版镜像,则无需配置安装组件
+    #   COMPONENTS_ENV: "kmsfw"  # 指定安装的组件,kmsfw 分别代表 Klipper,Moonraker,Mainsail,Fluidd,Crowsnest
+#     devices:
+#       - "/dev/ttyUSB0:/dev/ttyUSB0"  # 更改为实际连接的设备地址
+# volumes:  # 卷配置
+#   klipperd:  # 卷名称
+#    # external: true  # 外部卷(可选)
+#     name: klipperd  # 卷名称

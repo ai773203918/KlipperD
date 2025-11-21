@@ -1,0 +1,84 @@
+#!/usr/bin/expect
+# 指定 Expect 解释器(不可省略，否则在某些环境中会出错)
+# 设置超时时间(s)
+set timeout 6000
+# 抓取 KIAUH 脚本的输出
+spawn /home/zwzw/kiauh/kiauh.sh
+# 存储菜单交互
+set menu 1
+expect {
+    # 选择安装目录,选择当前用户目录
+    "to group(s) now?" { send "Y\r"; exp_continue }
+    # ############### 安装完成 ###############
+    # 要设置的额外 Klipper 实例的数量,不需要额外实例直接退出
+    "Number of additional Klipper instances to set up" {
+        set menu 0
+        send "B\r"
+        sleep 1
+        exp_continue
+    }
+    # Klipper 安装成功,标记menu为0,表示不再进入安装菜单
+    "Example printer.cfg created in" {
+        set menu 0
+        send "B\r"
+        sleep 1
+        exp_continue 
+    }
+    # Klipper 安装成功,标记menu为0,表示不再进入安装菜单
+    "Service file created: /etc/systemd/system/klipper.service" {
+        set menu 0
+        send "B\r"
+        sleep 1
+        exp_continue 
+    }
+    # ############ 主菜单 ############
+    # 选择安装(首次运行时需要进入安装菜单，后续运行则直接退出)
+    "Main Menu" {
+        # 内部变量menu,需要转义否则就是外部变量
+        if {$menu} {
+            send "1\r"
+            # 增加延迟时间,防止脚本过快执行
+            sleep 1
+            exp_continue
+        } else {
+            send "Q\r"
+            sleep 1
+            exp_continue
+        }
+    }
+    # ############ 安装菜单 ############
+    # 选择安装组件(首次运行时需要进入安装，后续运行则直接退出)
+    "Installation Menu" {
+        if {$menu} {
+            send "1\r"
+            sleep 1
+            exp_continue
+        } else {
+            send "B\r"
+            sleep 1
+            exp_continue
+        }
+    }
+    # 安装 Klipper 的实例数量,选择 1 个实例
+    "Number of Klipper instances to set up" { 
+        send "1\r"
+        sleep 1
+        exp_continue 
+    }
+    # 创建示例 printer.cfg 文件? 选择 Y
+    "Create example printer.cfg?" {
+        send "Y\r"
+        sleep 1
+        exp_continue 
+    }
+    # 分配自定义名称? 选择 N
+    "Assign custom names?" { send "N\r"; exp_continue }
+    # 警告：您当前的用户不在组中？选择 Y
+    "Your current user is not in group:" { send "Y\r"; exp_continue }
+    # 要继续安装? 选择 Y
+    "Proceed with installation?" { send "Y\r"; exp_continue }
+    # 超时处理
+    timeout {
+        puts "!!! 操作超时！"
+    }
+}

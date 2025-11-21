@@ -1,0 +1,88 @@
+#!/usr/bin/expect
+# 指定 Expect 解释器(不可省略，否则在某些环境中会出错)
+# 设置超时时间(s)
+set timeout 3000
+# 抓取 KIAUH 脚本的输出
+spawn /home/zwzw/kiauh/kiauh.sh
+# 存储菜单交互
+set menu 1
+expect {
+    # ########## 安装完成 #########
+    # 安装成功！退出 KIAUH
+    "Installation successful." {
+        set menu 0
+        send "B\r"
+        sleep 1
+        exp_continue
+    }
+    "Goodbye ..." {
+        set menu 0
+        send "B\r"
+        sleep 1
+        exp_continue
+    }
+    # ############ 主菜单 ############
+    # 选择安装(首次运行时需要进入安装菜单，后续运行则直接退出)
+    "Main Menu" {
+        # 内部变量menu,需要转义否则就是外部变量
+        if {$menu} {
+            send "1\r"
+            # 增加延迟时间,防止脚本过快执行
+            sleep 1
+            exp_continue
+        } else {
+            send "Q\r"
+            sleep 1
+            exp_continue
+        }
+    }
+    # ############ 安装菜单 ############
+    # 选择安装组件(首次运行时需要进入安装，后续运行则直接退出)
+    "Installation Menu" {
+        if {$menu} {
+            send "8\r"
+            sleep 1
+            exp_continue
+        } else {
+            send "B\r"
+            sleep 1
+            exp_continue
+        }
+    }
+    # 您想将"更新管理器"条目添加到您的 Moonraker.conf 中吗？保持默认Y直接回车
+    "Do you want to add 'update manager' entry to your moonraker.conf?" {
+        send "\r"
+        sleep 1
+        exp_continue
+    }
+    # 现在重启系统?保持默认N直接回车
+    "Reboot NOW?" {
+        send "\r"
+        sleep 1
+        exp_continue
+    }
+    # 安装成功,标记menu为0,表示不再进入安装菜单
+    "Installation successful" {
+        set menu 0
+        sleep 1
+        send "B\r"
+        exp_continue        
+    }
+    # 安装成功,标记menu为0,表示不再进入安装菜单
+    "Goodbye ..." {
+        set menu 0
+        sleep 1
+        send "B\r"
+        exp_continue        
+    }
+    # Crowsnest 目录已存在，询问是否覆盖
+    "already exists. Overwrite? (y/N):" {
+        send "y\r"
+        sleep 1
+        exp_continue
+    }
+    # 超时处理
+    timeout {
+        puts "!!! 操作超时！"
+    }
+}
