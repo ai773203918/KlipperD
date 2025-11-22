@@ -195,7 +195,7 @@ jobs:
 
       - name: 创建并推送多架构镜像清单
         run: |
-          FINAL_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/klipperd:${{ github.event.inputs.components_env }}"
+          FINAL_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/klipperd:$COMPONENTS_ENV_VALUE"
           IMAGES_LIST_STRING="${{ env.MANIFEST_IMAGES }}"
           IMAGES_LIST_STRING="${IMAGES_LIST_STRING%?}"
 
