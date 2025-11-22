@@ -9,6 +9,11 @@ on:
         required: true  # 此输入是必需的
         default: 'kmsfw'  # 默认值
         type: string  # 输入类型为字符串
+      target_platforms:
+        description: '指定要构建的平台 (用逗号分隔，例如: linux/amd64,linux/arm64)。留空则构建所有平台。'
+        required: false
+        default: '' # 默认为空，表示构建所有平台
+        type: string
   # 定时触发 - 每周六 UTC 00:00(北京时间 08:00)
   schedule:
     - cron: '0 0 * * 6'
@@ -25,8 +30,8 @@ jobs:
 
       - name: 设置 QEMU
         uses: docker/setup-qemu-action@v3
-        with:  # 设置 QEMU 支持的架构
-          platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v5  # 支持架构列表
+        # with:  # 设置 QEMU 支持的架构(禁用,运行时动态决定)
+        #   platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v5  # 支持架构列表
 
       - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -48,9 +53,24 @@ jobs:
             echo "👤 由手动触发,使用指定组件: $COMPONENTS_ENV_VALUE"
           fi
 
-          # ⭐定义目标架构列表(amd64 默认架构放在最后,放前面会导致其它架构的报错)
-          PLATFORMS=("linux/arm64" "linux/arm/v7" "linux/arm/v5" "linux/amd64")
-          # PLATFORMS=("linux/amd64")
+          # 将变量写入 GITHUB_ENV，使其在后续步骤中可用
+          echo "COMPONENTS_ENV_VALUE=${COMPONENTS_ENV_VALUE}" >> $GITHUB_ENV
+
+          # 定义默认的全平台列表
+          DEFAULT_PLATFORMS=("linux/arm64" "linux/arm/v7" "linux/arm/v5" "linux/amd64")
+          
+          # 从手动输入中读取平台字符串
+          MANUAL_PLATFORMS_STRING="${{ github.event.inputs.target_platforms }}"
+
+          if [ -z "$MANUAL_PLATFORMS_STRING" ]; then
+            # 如果手动输入为空，则使用默认平台列表(适用于定时触发或手动留空)
+            PLATFORMS=("${DEFAULT_PLATFORMS[@]}")
+            echo "🚀 使用默认平台列表进行构建: ${PLATFORMS[*]}"
+          else
+            # 如果手动输入不为空，则将逗号分隔的字符串转换为数组
+            IFS=',' read -ra PLATFORMS <<< "$MANUAL_PLATFORMS_STRING"
+            echo "🎯 使用手动指定的平台列表进行构建: ${PLATFORMS[*]}"
+          fi
 
           # 基础镜像名称(使用预构建的 918178/klipperd:base 作为基础镜像)
           BASE_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/klipperd:base"
@@ -195,27 +215,28 @@ jobs:
 
       - name: 创建并推送多架构镜像清单
         run: |
-          FINAL_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/klipperd:$COMPONENTS_ENV_VALUE"
+          COMPONENTS_TAG="${{ env.COMPONENTS_ENV_VALUE }}"
+          FINAL_IMAGE_BASE="${{ secrets.DOCKERHUB_USERNAME }}/klipperd"
+          
           IMAGES_LIST_STRING="${{ env.MANIFEST_IMAGES }}"
-          IMAGES_LIST_STRING="${IMAGES_LIST_STRING%?}"
+          IMAGES_LIST_STRING="${IMAGES_LIST_STRING%?}" # 移除末尾的逗号
 
           if [ -z "$IMAGES_LIST_STRING" ]; then
             echo "❌ 没有成功构建的架构镜像,无法创建多架构清单。"
             exit 1
           fi
 
-          # 计算带日期的标签 (格式: DDMMYY)
-          DATE_TAG=$(date +%d%m%y)
+          # 计算带日期的标签 (格式: YYMMDD 年月日)
+          DATE_TAG=$(date +%y%m%d)
           echo "📅 日期标签: ${DATE_TAG}"
 
           IMAGES_TO_MANIFEST_ARGS=$(echo "$IMAGES_LIST_STRING" | tr ',' ' ')
           echo "🔨 使用以下镜像创建多架构清单: ${IMAGES_TO_MANIFEST_ARGS}"
-          echo "🚀 最终镜像名称: ${FINAL_IMAGE_NAME}"
-          echo "🚀 创建多架构镜像，标签为: ${FINAL_IMAGE_NAME} 和 ${FINAL_IMAGE_NAME}-${DATE_TAG}"
+          echo "🚀 创建多架构镜像，标签为: ${FINAL_IMAGE_BASE}:${COMPONENTS_TAG} 和 ${FINAL_IMAGE_BASE}:${COMPONENTS_TAG}-${DATE_TAG}"
 
           eval docker buildx imagetools create \
-            --tag "${FINAL_IMAGE_NAME}" \
-            --tag "${FINAL_IMAGE_NAME}-${DATE_TAG}" \
+            --tag "${FINAL_IMAGE_BASE}:${COMPONENTS_TAG}" \
+            --tag "${FINAL_IMAGE_BASE}:${COMPONENTS_TAG}-${DATE_TAG}" \
             ${IMAGES_TO_MANIFEST_ARGS}
 
           echo "✅ 多架构镜像清单创建并推送成功!"
