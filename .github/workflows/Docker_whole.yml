@@ -10,9 +10,9 @@ on:
         default: 'kmsfw'  # 默认值
         type: string  # 输入类型为字符串
       target_platforms:
-        description: '指定要构建的平台 (用逗号分隔，例如: linux/amd64,linux/arm64)。留空则构建所有平台。'
+        description: '指定要构建的平台 (逗号分隔,如: linux/amd64,linux/arm64),留空则构建所有平台'
         required: false
-        default: '' # 默认为空，表示构建所有平台
+        default: '' # 默认为空,表示构建所有平台
         type: string
   # 定时触发 - 每周六 UTC 00:00(北京时间 08:00)
   schedule:
@@ -44,7 +44,7 @@ jobs:
 
       - name: 为每个架构构建、配置并打包镜像
         run: |
-          # 获取组件环境变量，为定时任务设置默认值
+          # 获取组件环境变量,为定时任务设置默认值
           if [ -z "${{ github.event.inputs.components_env }}" ]; then
             COMPONENTS_ENV_VALUE="kmsfw" # 定时任务默认安装所有组件
             echo "🤖 由定时任务触发,使用默认组件: $COMPONENTS_ENV_VALUE"
@@ -53,7 +53,7 @@ jobs:
             echo "👤 由手动触发,使用指定组件: $COMPONENTS_ENV_VALUE"
           fi
 
-          # 将变量写入 GITHUB_ENV，使其在后续步骤中可用
+          # 将变量写入 GITHUB_ENV,使其在后续步骤中可用
           echo "COMPONENTS_ENV_VALUE=${COMPONENTS_ENV_VALUE}" >> $GITHUB_ENV
 
           # 定义默认的全平台列表
@@ -63,11 +63,11 @@ jobs:
           MANUAL_PLATFORMS_STRING="${{ github.event.inputs.target_platforms }}"
 
           if [ -z "$MANUAL_PLATFORMS_STRING" ]; then
-            # 如果手动输入为空，则使用默认平台列表(适用于定时触发或手动留空)
+            # 如果手动输入为空,则使用默认平台列表(适用于定时触发或手动留空)
             PLATFORMS=("${DEFAULT_PLATFORMS[@]}")
             echo "🚀 使用默认平台列表进行构建: ${PLATFORMS[*]}"
           else
-            # 如果手动输入不为空，则将逗号分隔的字符串转换为数组
+            # 如果手动输入不为空,则将逗号分隔的字符串转换为数组
             IFS=',' read -ra PLATFORMS <<< "$MANUAL_PLATFORMS_STRING"
             echo "🎯 使用手动指定的平台列表进行构建: ${PLATFORMS[*]}"
           fi
@@ -91,7 +91,7 @@ jobs:
             # 拉取当前架构的基础镜像
             echo "正在拉取 ${PLATFORM} 架构的镜像..."
             docker pull --platform "${PLATFORM}" "${BASE_IMAGE_NAME}"
-            echo "✅ ${PLATFORM} 架构的镜像拉取完成。"
+            echo "✅ ${PLATFORM} 架构的镜像拉取完成"
 
             # 配置打包镜像标签
             ARCH_TAG=$(echo $PLATFORM | sed 's|linux/||g' | sed 's|/|-|g')
@@ -136,7 +136,7 @@ jobs:
                 done
 
                 if [ \$count -ge \$retries ]; then
-                  echo \"❌ 命令在 \$retries 次重试后仍然失败。\"
+                  echo \"❌ 命令在 \$retries 次重试后仍然失败\"
                   exit 1
                 fi
               }
@@ -148,12 +148,12 @@ jobs:
               # 2. 切换用户并克隆(这个操作不依赖 systemd,可以提前)
               echo '🔄 切换到 zwzw 用户并克隆 kiauh...'
               sudo -u zwzw bash -c 'git clone https://github.com/dw-0/kiauh.git /home/zwzw/kiauh'
-              echo '✅ kiauh 克隆完成。'
+              echo '✅ kiauh 克隆完成'
 
               # 3. 等待 systemd 达到稳定状态
               echo '⏳ 等待 systemd 达到稳定状态(running 或 degraded)...'
               retry 30 '[[ \$(systemctl is-system-running 2>/dev/null) == \"running\" || \$(systemctl is-system-running 2>/dev/null) == \"degraded\" ]]' 10
-              echo \"✅ systemd 已就绪。\"
+              echo \"✅ systemd 已就绪\"
 
               # 4. 按顺序执行安装脚本
               COMPONENTS_TO_INSTALL='${COMPONENTS_ENV_VALUE}'
@@ -222,7 +222,7 @@ jobs:
           IMAGES_LIST_STRING="${IMAGES_LIST_STRING%?}" # 移除末尾的逗号
 
           if [ -z "$IMAGES_LIST_STRING" ]; then
-            echo "❌ 没有成功构建的架构镜像,无法创建多架构清单。"
+            echo "❌ 没有成功构建的架构镜像,无法创建多架构清单"
             exit 1
           fi
 
@@ -232,7 +232,7 @@ jobs:
 
           IMAGES_TO_MANIFEST_ARGS=$(echo "$IMAGES_LIST_STRING" | tr ',' ' ')
           echo "🔨 使用以下镜像创建多架构清单: ${IMAGES_TO_MANIFEST_ARGS}"
-          echo "🚀 创建多架构镜像，标签为: ${FINAL_IMAGE_BASE}:${COMPONENTS_TAG} 和 ${FINAL_IMAGE_BASE}:${COMPONENTS_TAG}-${DATE_TAG}"
+          echo "🚀 创建多架构镜像,标签为: ${FINAL_IMAGE_BASE}:${COMPONENTS_TAG} 和 ${FINAL_IMAGE_BASE}:${COMPONENTS_TAG}-${DATE_TAG}"
 
           eval docker buildx imagetools create \
             --tag "${FINAL_IMAGE_BASE}:${COMPONENTS_TAG}" \
@@ -249,7 +249,7 @@ jobs:
       #     IMAGES_LIST_STRING="${IMAGES_LIST_STRING%?}"
 
       #     if [ -z "$IMAGES_LIST_STRING" ]; then
-      #       echo "没有需要清理的独立架构镜像。"
+      #       echo "没有需要清理的独立架构镜像"
       #       exit 0
       #     fi
 
@@ -268,4 +268,4 @@ jobs:
       #       fi
       #     done
 
-      #     echo "✅ 独立架构镜像清理完成。"
+      #     echo "✅ 独立架构镜像清理完成"
